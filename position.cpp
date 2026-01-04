@@ -32,6 +32,7 @@
 #include "tt.h"
 #include "ucioption.h"
 #include "thread.h"
+#include "nnue.h"
 
 #include "debug.h"
 
@@ -297,11 +298,18 @@ void Position::from_fen(const string& fen, bool isChess960) {
 //  write_neigh_arrays(neighOccSquares, neighExplValue);
 //  assert(neigh_is_ok());
   ENDNEW
-  
+
+  reset_nnue();
+
   return;
 
 incorrect_fen:
   cout << "Error in FEN string: " << fen << endl;
+}
+
+
+void Position::reset_nnue() {
+  nnue::reset_accumulators(*this, st->nnue);
 }
 
 
@@ -1322,6 +1330,7 @@ void Position::do_move(Move m, StateInfo& newSt, const CheckInfo& ci, bool moveI
     Square epSquare;
     Score value;
     Value npMaterial[2];
+    nnue::Accumulators nnue;
   };
 
   memcpy(&newSt, st, sizeof(ReducedStateInfo));
@@ -1496,6 +1505,33 @@ void Position::do_move(Move m, StateInfo& newSt, const CheckInfo& ci, bool moveI
   
   NEW // Set attacking piece
   NEW st->attackingType = pt;
+
+  // NNUE incremental update (atomic-aware)
+  {
+    nnue::Accumulators& accs = st->nnue;
+
+    if (capture) {
+      nnue::apply_remove(accs, piece, from);
+
+      for (int i = 0; i < st->expl.size; ++i) {
+        const Piece expl_piece = st->expl.piece[i];
+        if (expl_piece != PIECE_NONE)
+          nnue::apply_remove(accs, expl_piece, st->expl.square[i]);
+      }
+
+      if (ep) {
+        const Square capsq = (us == WHITE) ? Square(to - DELTA_N) : Square(to - DELTA_S);
+        nnue::apply_remove(accs, make_piece(them, PAWN), capsq);
+      }
+    } else if (pm) {
+      nnue::apply_remove(accs, piece, from);
+      const PieceType promotion = move_promotion_piece(m);
+      nnue::apply_add(accs, make_piece(us, promotion), to);
+    } else {
+      nnue::apply_remove(accs, piece, from);
+      nnue::apply_add(accs, piece, to);
+    }
+  }
 
   // Update the key with the final value
   st->key = key;
@@ -1848,6 +1884,11 @@ void Position::do_castle_move(Move m) {
   int tmp = index[rfrom]; // In Chess960 could be rto == kfrom
   index[kto] = index[kfrom];
   index[rto] = tmp;
+
+  nnue::apply_remove(st->nnue, king, kfrom);
+  nnue::apply_add(st->nnue, king, kto);
+  nnue::apply_remove(st->nnue, rook, rfrom);
+  nnue::apply_add(st->nnue, rook, rto);
 
   // Update incremental scores
   st->value += pst_delta(king, kfrom, kto);
@@ -2652,6 +2693,8 @@ void Position::flip() {
   // Material
   st->npMaterial[WHITE] = compute_non_pawn_material(WHITE);
   st->npMaterial[BLACK] = compute_non_pawn_material(BLACK);
+
+  reset_nnue();
 
   assert(is_ok());
 }

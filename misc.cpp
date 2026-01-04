@@ -18,25 +18,26 @@
 */
 
 
-#if !defined(_MSC_VER)
-
-#include <time.h>
-
-#  include <sys/time.h>
-#  include <sys/types.h>
-#  include <unistd.h>
-#  if defined(__hpux)
-#     include <sys/pstat.h>
-#  endif
-
-#else
+#if defined(_WIN32)
 
 #define _CRT_SECURE_NO_DEPRECATE
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <time.h>
+#if !defined(_MSC_VER)
+#  include <sys/time.h>
+#endif
 #undef WIN32_LEAN_AND_MEAN
-// #include <sys/timeb.h>
+
+#else
+
+#include <time.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#  if defined(__hpux)
+#     include <sys/pstat.h>
+#  endif
 
 #endif
 
@@ -239,8 +240,10 @@ int input_available() {
   // the input waiting in the pipe will be copied to the buffer,
   // and the call to PeekNamedPipe can indicate no input available.
   // Setting stdin to unbuffered was not enough. [from Greko]
+#if defined(_MSC_VER)
   if (stdin->_cnt > 0)
       return 1;
+#endif
 
   // When running under a GUI the input commands are sent to us
   // directly over the internal pipe. If PeekNamedPipe() returns 0

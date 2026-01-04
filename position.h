@@ -24,6 +24,7 @@
 #include "move.h"
 #include "types.h"
 #include "atomicdata.h"
+#include "nnue.h"
 #include <assert.h>
 
 struct ExplosionData;
@@ -76,6 +77,7 @@ struct StateInfo {
   Square epSquare;									// -> ReducedStateInfo
   Score value;										// 
   Value npMaterial[2];								// 
+  nnue::Accumulators nnue;
 
   PieceType capturedType;
   NEW PieceType attackingType;	// stores the attacking piece, which is removed after attack
@@ -207,6 +209,11 @@ public:
 
   // Piece captured with previous moves
   PieceType captured_piece_type() const;
+
+  // NNUE accumulator access (current state only)
+  const nnue::Accumulators& nnue_accumulators() const { return st->nnue; }
+  nnue::Accumulators& nnue_accumulators() { return st->nnue; }
+  void reset_nnue();
 
   // Information about pawns
   bool pawn_is_passed(Color c, Square s) const;

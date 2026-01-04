@@ -28,6 +28,7 @@
 #include "pawns.h"
 #include "thread.h"
 #include "ucioption.h"
+#include "nnue.h"
 
 #include "atomicdata.h"
 #include "debug.h"
@@ -35,6 +36,21 @@
 NEW int matDifFactor = 200;
 
 namespace {
+  inline bool has_explosion_threat(const Position& pos, Color attacker, Color victim) {
+    if (pos.piece_count(attacker, KING) == 0 || pos.piece_count(victim, KING) == 0)
+      return false;
+
+    Bitboard targets = pos.attacks_from<KING>(pos.king_square(victim)) & pos.pieces_of_color(victim);
+    while (targets) {
+      const Square sq = pop_1st_bit(&targets);
+      Bitboard attackers = pos.attackers_to(sq) & pos.pieces_of_color(attacker);
+      attackers &= ~pos.pieces(KING, attacker); // kings can't capture in atomic
+      if (attackers)
+        return true;
+    }
+
+    return false;
+  }
 
   // Struct EvalInfo contains various information computed and collected
   // by the evaluation functions.
@@ -314,13 +330,23 @@ namespace {
 NEW // the argument bool* expl_threat is set to true if the side to move has to react
 NEW // on an explosion threat by the enemey else it is set to false
 Value evaluate(const Position& pos, Value& margin, bool* expl_threat) {
-  NEW assert(pos.piece_count(pos.side_to_move(), KING));
-  
-  //NEW // if there is no king anymore, we are check mated
-  //NEW if (pos.piece_count(pos.side_to_move(), KING) == 0) return VALUE_MATED_IN_PLY_MAX;
-  
-  return CpuHasPOPCNT ? do_evaluate<true, false>(pos, margin, expl_threat)
-                      : do_evaluate<false, false>(pos, margin, expl_threat);
+  const Color us = pos.side_to_move();
+  const Color them = opposite_color(us);
+
+  if (expl_threat)
+    *expl_threat = false;
+
+  if (pos.piece_count(us, KING) == 0)
+    return VALUE_MATED_IN_PLY_MAX;
+
+  if (has_explosion_threat(pos, us, them))
+    return VALUE_KNOWN_WIN;
+
+  if (expl_threat)
+    *expl_threat = has_explosion_threat(pos, them, us);
+
+  margin = Value(128);
+  return Value(nnue::evaluate(pos.nnue_accumulators(), us));
 }
 
 namespace {

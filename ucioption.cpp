@@ -101,6 +101,7 @@ OptionsMap::OptionsMap() {
   o["Minimum Thinking Time"] = UCIOption(0, 0, 5000);
   o["UCI_Chess960"] = UCIOption(false);
   o["UCI_AnalyseMode"] = UCIOption(false);
+  o["EvalFile"] = UCIOption("<empty>");
 
   // Set some SMP parameters accordingly to the detected CPU count
   UCIOption& thr = o["Threads"];

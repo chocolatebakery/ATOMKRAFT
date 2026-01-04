@@ -18,6 +18,7 @@
 */
 
 #include <cassert>
+#include <cctype>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -28,6 +29,7 @@
 #include "position.h"
 #include "search.h"
 #include "ucioption.h"
+#include "nnue.h"
 
 using namespace std;
 
@@ -40,7 +42,7 @@ namespace {
   // is actually a string stream built on a given input string.
   typedef istringstream UCIParser;
 
-  void set_option(UCIParser& up);
+  void set_option(Position& pos, UCIParser& up);
   void set_position(Position& pos, UCIParser& up);
   bool go(Position& pos, UCIParser& up);
   void perft(Position& pos, UCIParser& up);
@@ -77,7 +79,7 @@ bool execute_uci_command(const string& cmd) {
       set_position(pos, up);
 
   else if (token == "setoption")
-      set_option(up);
+      set_option(pos, up);
 
   else if (token == "perft")
       perft(pos, up);
@@ -103,6 +105,7 @@ bool execute_uci_command(const string& cmd) {
       cout << "id name "     << engine_name()
            << "\nid author " << engine_authors()
            << "\n"           << Options.print_all()
+           << "\noption name UCI_Variant type combo default atomic var atomic"
            << "\nuciok"      << endl;
   else
       cout << "Unknown command: " << cmd << endl;
@@ -148,7 +151,7 @@ namespace {
   // command. The function updates the corresponding UCI option ("name")
   // to the given value ("value").
 
-  void set_option(UCIParser& up) {
+  void set_option(Position& pos, UCIParser& up) {
 
     string token, name;
     string value = "true"; // UCI buttons don't have a "value" field
@@ -170,6 +173,21 @@ namespace {
         Options[name].set_value(value);
     else
         cout << "No such option: " << name << endl;
+
+    string lowered = name;
+    for (size_t i = 0; i < lowered.size(); ++i)
+        lowered[i] = char(tolower(lowered[i]));
+
+    if (lowered == "evalfile") {
+        if (!nnue::load(Options["EvalFile"].value<string>())) {
+            const string& err = nnue::last_error();
+            if (!err.empty())
+                cout << "info string nnue: " << err << endl;
+        } else {
+            cout << "info string nnue: loaded \"" << Options["EvalFile"].value<string>() << "\"" << endl;
+        }
+        pos.reset_nnue();
+    }
   }
 
 

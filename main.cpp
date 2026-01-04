@@ -19,6 +19,7 @@
 #include "create_book.h"
 #include "pgn.h"
 #include "evaluate.h"
+#include "nnue.h"
 
 #include <pthread.h>
 #include <queue>
@@ -67,6 +68,12 @@ int main(int argc, char* argv[]) {
 	Threads.init();
 	generate_explosionSquares();
 	generate_squaresTouch();
+
+	if (!nnue::load(Options["EvalFile"].value<string>())) {
+		const string& err = nnue::last_error();
+		if (!err.empty())
+			cout << "NNUE: " << err << endl;
+	}
 	
 	
 #ifndef NDEBUG
