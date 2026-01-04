@@ -27,7 +27,7 @@ windows: # well, this works for me (direct, no *.o), with 2 align warnings
 windows64:
 	$(CXX) -g -O3 \
           -DNDEBUG -DWIN64_BUILD \
-         -o ATOMKRAFT64.exe *.cpp -static -lstdc++ -lwinpthread
+         -o ATOMKRAFT64.exe *.cpp datagen/*.cpp -static -lstdc++ -lwinpthread
 archive:
 	tar cf ATOMKRAFT.tar $(SRCS) $(HEADERS) Makefile
 depend: $(SRCS) $(HEADERS)

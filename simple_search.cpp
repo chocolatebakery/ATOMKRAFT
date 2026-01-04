@@ -48,10 +48,11 @@ Move test_bestmove(Position& pos, int maxdepth) {
 			}
 			bSearchPv = false;
 		}
-		
-		
-		cout << it_depth << " " << move_to_uci(pos, bestmove, 0) << " " << score << endl;
-		
+
+
+		// Disable debug output for datagen
+		// cout << it_depth << " " << move_to_uci(pos, bestmove, 0) << " " << score << endl;
+
 	}
 	
 	
