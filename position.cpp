@@ -895,8 +895,8 @@ bool Position::pl_move_is_legal(Move m, Bitboard pinned) const {
 	  if (squares_touch[to][opp_ksq]) {
 		  return true;
 	  }
-      
-	  
+
+
       // this is replacing the old code
 	  // first we need to update the king in occupied squares
 	  // since it may be possible (e.g. kings adjacent) for a king to move along 
@@ -1198,7 +1198,7 @@ bool Position::move_gives_check(Move m, const CheckInfo& ci) const {
 	  b |= notexpl_pawns_bb;	// and restore pawns
 	  
 	  // test if own pieces now give check  
-	  // the code differs slightly from the en passant code    ¯¯¯¯¯¯¯|¯¯¯|
+	  // the code differs slightly from the en passant code    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½|ï¿½ï¿½ï¿½|
 	  //                                                              V   |
       return  (rook_attacks_bb(ci.ksq, b) & pieces(ROOK, QUEEN, us) & b)//V
             ||(bishop_attacks_bb(ci.ksq, b) & pieces(BISHOP, QUEEN, us) & b);
@@ -1621,7 +1621,7 @@ void Position::do_move(Move m, StateInfo& newSt, const CheckInfo& ci, bool moveI
 #ifndef NDEBUG
   int failstep;
   bool isok = is_ok(&failstep);
-  
+
   if (!isok) {
 	  cout << "failstep: " << failstep << endl;
 	  cout << "from: " << from << endl;
@@ -1632,7 +1632,7 @@ void Position::do_move(Move m, StateInfo& newSt, const CheckInfo& ci, bool moveI
 #endif
   ENDNEW
 
-  
+
   OLD assert(is_ok());
   NEW assert(isok);
 }

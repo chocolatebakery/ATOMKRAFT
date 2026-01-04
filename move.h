@@ -188,6 +188,7 @@ inline bool move_is_ok(Move m) {
 class Position;
 
 extern const std::string move_to_uci(Move m, bool chess960);
+extern const std::string move_to_uci(const Position& pos, Move m, bool chess960);
 extern const std::string move_to_string(Move m);
 extern Move move_from_uci(const Position& pos, const std::string& str);
 extern const std::string move_to_san(Position& pos, Move m);

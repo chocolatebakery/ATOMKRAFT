@@ -98,6 +98,28 @@ const string move_to_uci(Move m, bool chess960) {
   return square_to_string(from) + square_to_string(to) + promotion;
 }
 
+const string move_to_uci(const Position& pos, Move m, bool chess960) {
+
+  string uci = move_to_uci(m, chess960);
+
+  if (m == MOVE_NONE || m == MOVE_NULL || move_is_promotion(m))
+      return uci;
+
+  Square from = move_from(m);
+  Square to = move_to(m);
+
+  if (pos.type_of_piece_on(from) != PAWN)
+      return uci;
+
+  Rank promoRank = (pos.side_to_move() == WHITE ? RANK_8 : RANK_1);
+  if (square_rank(to) != promoRank)
+      return uci;
+
+  // Atomic capture promotions are encoded as normal captures, but UCI
+  // still expects a promotion suffix for pawn moves to the last rank.
+  return uci + "q";
+}
+
 
 /// move_from_uci() takes a position and a string representing a move in
 /// simple coordinate notation and returns an equivalent Move if any.
@@ -109,9 +131,18 @@ Move move_from_uci(const Position& pos, const string& str) {
   MoveStack mlist[MAX_MOVES];
   MoveStack* last = generate<MV_LEGAL>(pos, mlist);
   
-  for (MoveStack* cur = mlist; cur != last; cur++)
-      if (str == move_to_uci(cur->move, pos.is_chess960()))
+  for (MoveStack* cur = mlist; cur != last; cur++) {
+      const string uci = move_to_uci(pos, cur->move, pos.is_chess960());
+      if (str == uci)
           return cur->move;
+
+      if (!move_is_promotion(cur->move) && uci.size() == 5) {
+          const string prefix = uci.substr(0, 4);
+          if ((str.size() == 4 && str == prefix) ||
+              (str.size() == 5 && str.substr(0, 4) == prefix))
+              return cur->move;
+      }
+  }
 
   return MOVE_NONE;
 }

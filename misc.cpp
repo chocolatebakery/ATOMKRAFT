@@ -61,7 +61,7 @@ using namespace std;
 /// current date (in the format YYMMDD) is used as a version number.
 
 static const string AppName = "atomkraft";
-static const string EngineVersion = "1.0.0";
+static const string EngineVersion = "2.0.0";
 static const string AppTag  = "";
 
 
@@ -96,7 +96,7 @@ const string engine_name() {
 
 const string engine_authors() {
 
-  return "Tord Romstad, Marco Costalba, Joona Kiiski and Dirk Kretschmann";
+  return "Tord Romstad, Marco Costalba, Joona Kiiski, Dirk Kretschmann, Ciekce, ChocolateBakery";
 }
 
 

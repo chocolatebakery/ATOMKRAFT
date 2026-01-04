@@ -413,7 +413,7 @@ bool think(Position& pos, const SearchLimits& limits, Move searchMoves[], Move& 
           
           NEW NEW_bestMove = bookMove;
 #if !defined TEST_VERSION
-          cout << "bestmove " << bookMove << endl;
+          cout << "bestmove " << move_to_uci(pos, bookMove, pos.is_chess960()) << endl;
 #endif
           return !QuitRequest;
       }
@@ -502,12 +502,15 @@ bool think(Position& pos, const SearchLimits& limits, Move searchMoves[], Move& 
   //NEW cout << "test3" << endl;
 
   // Could be MOVE_NONE when searching on a stalemate position
-  cout << "bestmove " << bestMove;
+  cout << "bestmove " << move_to_uci(pos, bestMove, pos.is_chess960());
 
   // UCI protocol is not clear on allowing sending an empty ponder move, instead
   // it is clear that ponder move is optional. So skip it if empty.
-  if (ponderMove != MOVE_NONE) {
-      cout << " ponder " << ponderMove;
+  if (ponderMove != MOVE_NONE && bestMove != MOVE_NONE) {
+      StateInfo st;
+      pos.do_move(bestMove, st);
+      cout << " ponder " << move_to_uci(pos, ponderMove, pos.is_chess960());
+      pos.undo_move(bestMove);
       NEW NEW_ponderMove = ponderMove;
   }
 
@@ -2309,7 +2312,8 @@ split_point_start: // At split points actual search starts from here
     {Z=pos.get_key();
      for (int h=0;h<H;h++) if (pos.get_key()==SAVE[h]) goto EXIT;
      SAVE[H++]=pos.get_key();    // modification so that reps are not repeated
-     s << pv[ply] << " "; pos.do_move(pv[ply++],*st++);
+     s << move_to_uci(pos, pv[ply], pos.is_chess960()) << " ";
+     pos.do_move(pv[ply++],*st++);
     }
   EXIT:
     do pos.undo_move(pv[--ply]); while (ply);

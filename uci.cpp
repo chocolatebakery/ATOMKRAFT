@@ -26,6 +26,7 @@
 #include "evaluate.h"
 #include "misc.h"
 #include "move.h"
+#include "movegen.h"
 #include "position.h"
 #include "search.h"
 #include "ucioption.h"
@@ -252,10 +253,20 @@ namespace {
     if (!(up >> depth))
         return;
 
+    if (depth == 1) {
+        MoveStack mlist[MAX_MOVES];
+        MoveStack* last = generate<MV_LEGAL>(pos, mlist);
+        n = last - mlist;
+
+        for (MoveStack* cur = mlist; cur != last; cur++)
+            cout << move_to_uci(pos, cur->move, pos.is_chess960()) << ": 1" << endl;
+
+        cout << "\nNodes searched: " << n << endl;
+        return;
+    }
+
     time = get_system_time();
-
     n = perft(pos, depth * ONE_PLY);
-
     time = get_system_time() - time;
 
     std::cout << "\nNodes " << n

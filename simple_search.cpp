@@ -50,7 +50,7 @@ Move test_bestmove(Position& pos, int maxdepth) {
 		}
 		
 		
-		cout << it_depth << " " << move_to_uci(bestmove, 0) << " " << score << endl;
+		cout << it_depth << " " << move_to_uci(pos, bestmove, 0) << " " << score << endl;
 		
 	}
 	
