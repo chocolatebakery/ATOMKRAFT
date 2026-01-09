@@ -1340,7 +1340,11 @@ void Position::do_move(Move m, StateInfo& newSt, const CheckInfo& ci, bool moveI
 
   // Save the current key to the history[] array, in order to be able to
   // detect repetition draws.
-  history[st->gamePly++] = key;
+  // CRITICAL: Check bounds to avoid overflow in long datagen games
+  if (st->gamePly < MaxGameLength - 1)
+    history[st->gamePly++] = key;
+  else
+    st->gamePly++;  // Still increment but don't write to array
 
   // Update side to move
   key ^= zobSideToMove;
@@ -2587,13 +2591,27 @@ template bool Position::is_draw<true>() const;
 /// side to move is checkmated.
 
 bool Position::is_mate() const {
+  // CRITICAL: In atomic chess, check if either king is missing first
+  // If king exploded, it's not mate, it's game over (handled by is_variant_over)
+  if (piece_count(WHITE, KING) == 0 || piece_count(BLACK, KING) == 0) {
+    return false;  // Not mate, game already over
+  }
+
   STARTNEW
   if (piece_count(side_to_move(), KING) == 0) {
-	  return true;
+    return true;
   }
   ENDNEW
   MoveStack moves[MAX_MOVES];
   return in_check() && generate<MV_LEGAL>(*this, moves) == moves;
+}
+
+
+/// Position::is_variant_over() checks if the game is over due to atomic chess
+/// variant rules (either king has been captured/exploded)
+
+bool Position::is_variant_over() const {
+  return piece_count(WHITE, KING) == 0 || piece_count(BLACK, KING) == 0;
 }
 
 

@@ -149,8 +149,12 @@ namespace {
 
   template<>
   FORCE_INLINE MoveStack* generate_piece_moves<KING>(const Position& pos, MoveStack* mlist, Color us, Bitboard target) {
-	NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
-	
+    // CRITICAL: Check both kings exist in atomic chess
+    if (pos.piece_count(WHITE, KING) == 0 || pos.piece_count(BLACK, KING) == 0)
+      return mlist;
+
+    NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
+
     Bitboard b;
     Square from = pos.king_square(us);
 
@@ -173,16 +177,16 @@ namespace {
 
 template<MoveType Type>
 MoveStack* generate(const Position& pos, MoveStack* mlist) {
+  // CRITICAL: Check if both kings exist before generating moves
+  // In atomic chess, kings can explode, making move generation invalid
+  if (pos.piece_count(WHITE, KING) == 0 || pos.piece_count(BLACK, KING) == 0) {
+    return mlist;
+  }
+
   NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
-		
+
   assert(pos.is_ok());
   assert(!pos.in_check());
-  
-  STARTNEW
-  if (pos.piece_count(pos.side_to_move(), KING) == 0) {
-	  return mlist;
-  }
-  ENDNEW
 
   Color us = pos.side_to_move();
   Bitboard target;
@@ -280,8 +284,14 @@ MoveStack* generate<MV_NON_CAPTURE_CHECK>(const Position& pos, MoveStack* mlist)
 /// the side to move is in check. Returns a pointer to the end of the move list.
 template<>
 MoveStack* generate<MV_EVASION>(const Position& pos, MoveStack* mlist) {
+  // CRITICAL: Check if both kings exist before generating evasions
+  // In atomic chess, kings can explode, making move generation invalid
+  if (pos.piece_count(WHITE, KING) == 0 || pos.piece_count(BLACK, KING) == 0) {
+    return mlist;
+  }
+
   NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
-		
+
   assert(pos.is_ok());
   assert(pos.in_check());
 
@@ -534,7 +544,16 @@ namespace {
 
   template<Color Us, MoveType Type>
   MoveStack* generate_pawn_moves(const Position& pos, MoveStack* mlist, Bitboard target, Square ksq) {
-	NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
+    // CRITICAL: If ksq is SQ_NONE, a king exploded in atomic chess
+    // This can happen if king_square() was called on missing king
+    if (ksq == SQ_NONE && Type == MV_EVASION)
+      return mlist;
+
+    // CRITICAL: Check both kings exist for atomic chess
+    if (pos.piece_count(WHITE, KING) == 0 || pos.piece_count(BLACK, KING) == 0)
+      return mlist;
+
+    NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
 	  	
     // Calculate our parametrized parameters at compile time, named
     // according to the point of view of white side.
@@ -641,8 +660,12 @@ namespace {
 
   template<CastlingSide Side>
   MoveStack* generate_castle_moves(const Position& pos, MoveStack* mlist, Color us) {
-	NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
-	  	
+    // CRITICAL: Check both kings exist in atomic chess before castling
+    if (pos.piece_count(WHITE, KING) == 0 || pos.piece_count(BLACK, KING) == 0)
+      return mlist;
+
+    NEW assert(pos.piece_count(WHITE, KING) && pos.piece_count(BLACK, KING));
+
     Color them = opposite_color(us);
     NEW assert(pos.piece_count(us, KING));
     Square ksq = pos.king_square(us);

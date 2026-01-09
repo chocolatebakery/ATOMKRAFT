@@ -1,0 +1,5 @@
+./datagen_output/
+./datagen_output/*
+depend
+ATOMKRAFT64.exe
+

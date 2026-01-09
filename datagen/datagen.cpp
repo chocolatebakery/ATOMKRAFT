@@ -1,333 +1,324 @@
 /*
-  Datagen implementation for Atomkraft
-  Generates self-play games for NNUE training using Marlinformat
+  Simple Datagen for Atomkraft - Built from scratch for atomic chess
+  Generates training data in Marlinformat for NNUE training
 */
 
 #include "datagen.h"
 #include "marlinformat.h"
 #include "../position.h"
-#include "../search.h"
-#include "../simple_search.h"
-#include "../thread.h"
-#include "../tt.h"
-#include "../misc.h"
-#include "../evaluate.h"
 #include "../movegen.h"
-#include "../nnue.h"
+#include "../evaluate.h"
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <thread>
+#include <atomic>
 #include <vector>
-#include <cstdlib>
 #include <ctime>
 
 using namespace std;
 
 namespace datagen {
 
-// Thread-local data for game generation
-struct ThreadData {
-    int threadId;
-    string outputPath;
-    int gamesTarget;
-    uint64_t rngSeed;
-
-    // Statistics
-    int gamesGenerated;
-    int64_t positionsWritten;
-    int64_t timeStarted;
-
-    ThreadData(int id, const string& path, int target)
-        : threadId(id), outputPath(path), gamesTarget(target),
-          gamesGenerated(0), positionsWritten(0) {
-        // Unique seed per thread
-        rngSeed = static_cast<uint64_t>(time(nullptr)) + id * 1000000;
-        timeStarted = get_system_time();
-    }
-};
-
-// Simple xorshift64 RNG for move randomization
+// Simple RNG for game randomization
 class SimpleRNG {
 private:
     uint64_t state;
 public:
-    explicit SimpleRNG(uint64_t seed) : state(seed ? seed : 1) {}
+    SimpleRNG(uint64_t seed) : state(seed) {}
 
-    uint64_t next() {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        return state;
+    uint32_t next() {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        return uint32_t((state * 0x2545F4914F6CDD1DULL) >> 32);
     }
 
     int randInt(int max) {
-        return static_cast<int>(next() % max);
+        return next() % max;
     }
 };
 
-// Check if a position/move is "noisy" (tactical)
-bool isNoisy(const Position& pos, Move move) {
-    // In atomic chess, captures are always noisy
-    if (pos.move_is_capture(move))
-        return true;
-
-    // Checks are noisy
-    if (pos.move_gives_check(move))
+// Check if a move is "noisy" (tactical)
+inline bool isNoisy(const Position& pos, Move m) {
+    // Captures are noisy
+    if (pos.move_is_capture(m))
         return true;
 
     // Promotions are noisy
-    if (move_is_promotion(move))
+    if (move_is_promotion(m))
+        return true;
+
+    // Checks are noisy
+    if (pos.move_gives_check(m))
         return true;
 
     return false;
 }
 
-// Generate random opening position
-void generateOpening(Position& pos, SimpleRNG& rng) {
-    // Start from initial position
-    vector<StateInfo> st(config::MAX_RANDOM_PLIES);
-
-    // Play random moves to reach realistic opening
-    int numMoves = config::MIN_RANDOM_PLIES +
-                   rng.randInt(config::MAX_RANDOM_PLIES - config::MIN_RANDOM_PLIES + 1);
-
-    for (int i = 0; i < numMoves; i++) {
-        MoveStack moves[MAX_MOVES];
-        MoveStack* last = generate<MV_LEGAL>(pos, moves);
-        int numLegal = int(last - moves);
-
-        if (numLegal == 0)
-            break;  // Game over
-
-        // Pick random legal move
-        Move move = moves[rng.randInt(numLegal)].move;
-        pos.do_move(move, st[i]);
-    }
-}
-
-// Outcome adjudication based on score
+// Track game outcome based on evaluation
 class OutcomeTracker {
 private:
-    int winAdjCount;
-    int lossAdjCount;
-    int drawAdjCount;
+    int winCount, lossCount, drawCount;
+
+    static const int WIN_SCORE = 2500;   // 25 pawns advantage
+    static const int DRAW_SCORE = 10;    // 0.1 pawns
+    static const int WIN_PLIES = 5;      // 5 consecutive plies
+    static const int DRAW_PLIES = 10;    // 10 consecutive plies
+    static const int DRAW_MIN_PLY = 70;  // Don't adjudicate draws too early
 
 public:
-    OutcomeTracker() : winAdjCount(0), lossAdjCount(0), drawAdjCount(0) {}
+    OutcomeTracker() : winCount(0), lossCount(0), drawCount(0) {}
 
-    // Update with new score and return true if adjudicated
-    bool update(int score, int ply, Outcome& result) {
-        // Win adjudication
-        if (score >= config::WIN_ADJ_MIN_SCORE) {
-            winAdjCount++;
-            lossAdjCount = 0;
-            drawAdjCount = 0;
-
-            if (winAdjCount >= config::WIN_ADJ_PLY_COUNT) {
-                result = Outcome::WhiteWin;
+    // Returns true if game should be adjudicated, sets outcome
+    bool shouldAdjudicate(int score, int ply, Outcome& outcome) {
+        if (score >= WIN_SCORE) {
+            winCount++;
+            lossCount = 0;
+            drawCount = 0;
+            if (winCount >= WIN_PLIES) {
+                outcome = Outcome::WhiteWin;
                 return true;
             }
         }
-        // Loss adjudication
-        else if (score <= -config::WIN_ADJ_MIN_SCORE) {
-            lossAdjCount++;
-            winAdjCount = 0;
-            drawAdjCount = 0;
-
-            if (lossAdjCount >= config::WIN_ADJ_PLY_COUNT) {
-                result = Outcome::WhiteLoss;
+        else if (score <= -WIN_SCORE) {
+            lossCount++;
+            winCount = 0;
+            drawCount = 0;
+            if (lossCount >= WIN_PLIES) {
+                outcome = Outcome::WhiteLoss;
                 return true;
             }
         }
-        // Draw adjudication
-        else if (abs(score) <= config::DRAW_ADJ_MAX_SCORE &&
-                 ply >= config::DRAW_ADJ_MIN_PLIES) {
-            drawAdjCount++;
-            winAdjCount = 0;
-            lossAdjCount = 0;
-
-            if (drawAdjCount >= config::DRAW_ADJ_PLY_COUNT) {
-                result = Outcome::Draw;
+        else if (abs(score) <= DRAW_SCORE && ply >= DRAW_MIN_PLY) {
+            drawCount++;
+            winCount = 0;
+            lossCount = 0;
+            if (drawCount >= DRAW_PLIES) {
+                outcome = Outcome::Draw;
                 return true;
             }
         }
-        // Reset counters if score changed
         else {
-            winAdjCount = 0;
-            lossAdjCount = 0;
-            drawAdjCount = 0;
+            winCount = 0;
+            lossCount = 0;
+            drawCount = 0;
         }
-
         return false;
     }
 };
 
-// Generate a single game
-bool generateGame(ThreadData& thread, MarlinformatWriter& writer, ofstream& file) {
-    SimpleRNG rng(thread.rngSeed++);
+// Generate one game of training data
+bool generateGame(uint64_t seed, const string& nnuePath, vector<PackedBoard>& positions, Outcome& outcome) {
+    SimpleRNG rng(seed);
+    positions.clear();
+    outcome = Outcome::Draw;
 
-    // Create position
+    // Create starting position
     Position pos("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, 0);
 
-    // Generate random opening
-    generateOpening(pos, rng);
-
-    // Skip verification for now - just play the game
-    // TODO: Re-enable verification once search is working properly
-
-    // Start recording game
-    writer.start();
-    OutcomeTracker tracker;
-    vector<PackedBoard> positions;
-
-    vector<StateInfo> st(1000);  // Use vector instead of array to avoid stack overflow
+    // StateInfo array - keep it small to avoid stack overflow
+    vector<StateInfo> states(200);
     int ply = 0;
-    Outcome finalOutcome = Outcome::Draw;
+
+    // Random opening (8-9 moves)
+    int openingMoves = 8 + rng.randInt(2);
+    for (int i = 0; i < openingMoves && ply < 200; i++) {
+        // Check if game is already over
+        if (pos.piece_count(WHITE, KING) == 0) {
+            outcome = Outcome::WhiteLoss;
+            return positions.size() > 0;
+        }
+        if (pos.piece_count(BLACK, KING) == 0) {
+            outcome = Outcome::WhiteWin;
+            return positions.size() > 0;
+        }
+
+        // Generate legal moves
+        MoveStack moves[MAX_MOVES];
+        MoveStack* end = generate<MV_LEGAL>(pos, moves);
+        int numMoves = int(end - moves);
+
+        if (numMoves == 0)
+            break;
+
+        // Pick random move
+        Move m = moves[rng.randInt(numMoves)].move;
+        pos.do_move(m, states[ply++]);
+    }
+
+    // Check if opening ended the game
+    if (pos.piece_count(WHITE, KING) == 0) {
+        outcome = Outcome::WhiteLoss;
+        return false;  // No positions to save from opening
+    }
+    if (pos.piece_count(BLACK, KING) == 0) {
+        outcome = Outcome::WhiteWin;
+        return false;
+    }
+
+    // Main game loop
+    OutcomeTracker tracker;
     bool adjudicated = false;
 
-    // Play game to completion
-    while (ply < 999) {
-        // Check for game end conditions
-        if (pos.is_mate()) {
-            finalOutcome = pos.side_to_move() == WHITE ? Outcome::WhiteLoss : Outcome::WhiteWin;
+    while (ply < 200) {
+        // Check if game is over (king exploded)
+        if (pos.piece_count(WHITE, KING) == 0) {
+            outcome = Outcome::WhiteLoss;
+            break;
+        }
+        if (pos.piece_count(BLACK, KING) == 0) {
+            outcome = Outcome::WhiteWin;
             break;
         }
 
-        if (pos.is_draw<false>()) {
-            finalOutcome = Outcome::Draw;
-            break;
-        }
-
-        // Use random moves for now (search crashes - needs investigation)
-        // TODO: Fix search to work properly in datagen context
+        // Generate legal moves
         MoveStack moves[MAX_MOVES];
-        MoveStack* last = generate<MV_LEGAL>(pos, moves);
-        int numLegal = int(last - moves);
+        MoveStack* end = generate<MV_LEGAL>(pos, moves);
+        int numMoves = int(end - moves);
 
-        if (numLegal == 0)
-            break;  // No legal moves
+        // Check for game end - no legal moves
+        if (numMoves == 0) {
+            if (pos.in_check()) {
+                // Checkmate
+                outcome = pos.side_to_move() == WHITE ? Outcome::WhiteLoss : Outcome::WhiteWin;
+            } else {
+                // Stalemate
+                outcome = Outcome::Draw;
+            }
+            break;
+        }
 
-        // Pick random legal move
-        Move bestMove = moves[rng.randInt(numLegal)].move;
+        // Pick random move
+        Move m = moves[rng.randInt(numMoves)].move;
 
-        // Get evaluation score
+        // Evaluate position BEFORE making the move
         Value margin = VALUE_ZERO;
         Value score = evaluate(pos, margin, NULL);
 
         // Check for adjudication
-        if (tracker.update(score, ply, finalOutcome)) {
+        if (tracker.shouldAdjudicate(score, ply, outcome)) {
             adjudicated = true;
             break;
         }
 
-        // Store position if not noisy
-        bool filtered = pos.in_check() || isNoisy(pos, bestMove);
-        if (!filtered) {
+        // Save position if it's quiet (not noisy, not in check)
+        if (!pos.in_check() && !isNoisy(pos, m)) {
             PackedBoard packed = MarlinformatWriter::packPosition(pos, score);
             positions.push_back(packed);
         }
 
-        // Make move
-        pos.do_move(bestMove, st[ply]);
-        ply++;
-    }
+        // Make the move
+        pos.do_move(m, states[ply++]);
 
-    // Write all positions with final outcome
-    if (positions.size() > 0) {
-        for (auto& board : positions) {
-            board.wdl = finalOutcome;
+        // Check for draw by repetition or 50-move rule
+        if (pos.is_draw<false>()) {
+            outcome = Outcome::Draw;
+            break;
         }
-
-        file.write(reinterpret_cast<const char*>(positions.data()),
-                   positions.size() * sizeof(PackedBoard));
-
-        thread.positionsWritten += positions.size();
     }
 
-    return true;
+    // If we hit the ply limit, adjudicate as draw
+    if (ply >= 200 && !adjudicated) {
+        outcome = Outcome::Draw;
+    }
+
+    return positions.size() > 0;
 }
 
-// Worker thread function
-void runThread(ThreadData& thread) {
-    // Open output file
-    stringstream filename;
-    filename << thread.outputPath << "/" << thread.threadId << ".bin";
+// Thread worker function
+void workerThread(int threadId, uint64_t baseSeed, int numGames,
+                  const string& nnuePath, const string& outputDir,
+                  atomic<int>& totalGames, atomic<int64_t>& totalPositions) {
 
-    ofstream file(filename.str(), ios::binary);
-    if (!file.is_open()) {
-        cerr << "Error: Could not open output file " << filename.str() << endl;
+    // Open output file for this thread
+    string filename = outputDir + "/" + to_string(threadId) + ".bin";
+    ofstream outFile(filename, ios::binary);
+    if (!outFile) {
+        cerr << "Error: Cannot open " << filename << " for writing" << endl;
         return;
     }
 
-    MarlinformatWriter writer;
+    int gamesWritten = 0;
+    int64_t positionsWritten = 0;
 
-    cout << "Thread " << thread.threadId << " started, writing to " << filename.str() << endl;
+    for (int gameNum = 0; gameNum < numGames; gameNum++) {
+        uint64_t seed = baseSeed + threadId * 1000000ULL + gameNum;
 
-    // Generate games
-    while (thread.gamesTarget == 0 || thread.gamesGenerated < thread.gamesTarget) {
-        if (generateGame(thread, writer, file)) {
-            thread.gamesGenerated++;
+        vector<PackedBoard> positions;
+        Outcome outcome;
 
-            // Report progress
-            if (thread.gamesGenerated % config::GAMES_PER_REPORT == 0) {
-                int64_t elapsed = get_system_time() - thread.timeStarted;
-                double posPerSec = (elapsed > 0) ?
-                    (thread.positionsWritten * 1000.0 / elapsed) : 0.0;
+        if (generateGame(seed, nnuePath, positions, outcome)) {
+            // Set outcome for all positions
+            for (auto& pos : positions) {
+                pos.wdl = outcome;
+            }
 
-                cout << "thread " << thread.threadId
-                     << ": wrote " << thread.positionsWritten
-                     << " positions from " << thread.gamesGenerated
-                     << " games in " << (elapsed / 1000) << " sec "
-                     << "(" << posPerSec << " positions/sec)" << endl;
+            // Write to file
+            outFile.write(reinterpret_cast<const char*>(positions.data()),
+                         positions.size() * sizeof(PackedBoard));
+
+            positionsWritten += positions.size();
+            gamesWritten++;
+
+            // Progress report every 100 games
+            if ((gameNum + 1) % 100 == 0) {
+                int total = totalGames.fetch_add(100) + 100;
+                int64_t totalPos = totalPositions.fetch_add(positionsWritten) + positionsWritten;
+                positionsWritten = 0;
+
+                cout << "Thread " << threadId << ": " << gamesWritten
+                     << " games, " << totalPos << " positions total" << endl;
             }
         }
     }
 
-    file.close();
+    // Final update
+    totalGames.fetch_add(gamesWritten % 100);
+    totalPositions.fetch_add(positionsWritten);
 
-    cout << "Thread " << thread.threadId << " finished: "
-         << thread.positionsWritten << " positions from "
-         << thread.gamesGenerated << " games" << endl;
+    outFile.close();
+    cout << "Thread " << threadId << " finished: " << gamesWritten << " games written" << endl;
 }
 
 // Main datagen entry point
 void run(const string& nnuePath, const string& outputPath, int threads, int gamesPerThread) {
-    cout << "Starting datagen with " << threads << " threads" << endl;
-    cout << "NNUE file: " << nnuePath << endl;
-    cout << "Output directory: " << outputPath << endl;
-
-    if (gamesPerThread > 0) {
-        cout << "Generating " << gamesPerThread << " games per thread" << endl;
-    } else {
-        cout << "Generating games until interrupted (Ctrl+C)" << endl;
-    }
+    cout << "Starting simple datagen:" << endl;
+    cout << "  Threads: " << threads << endl;
+    cout << "  Games per thread: " << gamesPerThread << endl;
+    cout << "  Output: " << outputPath << endl;
 
     // Load NNUE
     if (!nnue::load(nnuePath)) {
-        cerr << "Error loading NNUE: " << nnue::last_error() << endl;
+        cerr << "Error: Failed to load NNUE from " << nnuePath << endl;
+        cerr << "  " << nnue::last_error() << endl;
         return;
     }
     cout << "NNUE loaded successfully!" << endl;
 
-    // Initialize search system
-    init_search();
+    // Create output directory (ignoring errors if it exists)
+    system(("mkdir " + outputPath + " 2>nul").c_str());
 
-    // Initialize transposition table (64 MB should be enough for datagen)
-    TT.set_size(64);
-    TT.clear();
+    // Start threads
+    vector<thread> workers;
+    atomic<int> totalGames(0);
+    atomic<int64_t> totalPositions(0);
+    uint64_t baseSeed = time(nullptr);
 
-    // Create thread data
-    vector<ThreadData> threadData;
+    cout << "\nStarting " << threads << " worker threads..." << endl;
+
     for (int i = 0; i < threads; i++) {
-        threadData.emplace_back(i, outputPath, gamesPerThread);
+        workers.emplace_back(workerThread, i, baseSeed, gamesPerThread,
+                            nnuePath, outputPath, ref(totalGames), ref(totalPositions));
     }
 
-    // Run single threaded for now (multi-threading requires more infrastructure)
-    for (int i = 0; i < threads; i++) {
-        runThread(threadData[i]);
+    // Wait for all threads
+    for (auto& worker : workers) {
+        worker.join();
     }
 
-    cout << "Datagen complete!" << endl;
+    cout << "\nDatagen complete!" << endl;
+    cout << "Total games: " << totalGames.load() << endl;
+    cout << "Total positions: " << totalPositions.load() << endl;
 }
 
 } // namespace datagen

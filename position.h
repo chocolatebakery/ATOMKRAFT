@@ -248,6 +248,7 @@ public:
   // Game termination checks
   bool is_mate() const;
   template<bool SkipRepetition> bool is_draw() const;
+  bool is_variant_over() const;  // Atomic chess: check if either king is missing
 
   // Number of plies from starting position
   int startpos_ply_counter() const;
@@ -458,6 +459,10 @@ inline Square Position::ep_square() const {
 
 inline Square Position::king_square(Color c) const {
 	NEW assert(piece_count(c, KING));
+  // CRITICAL: In atomic chess, king can explode
+  // Return SQ_NONE if king doesn't exist instead of crashing
+  if (piece_count(c, KING) == 0)
+    return SQ_NONE;
   return pieceList[c][KING][0];
 }
 

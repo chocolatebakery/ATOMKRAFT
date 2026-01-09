@@ -83,6 +83,10 @@ extern uint8_t BitCount8Bit[256];
 /// setting and clearing bits.
 
 inline Bitboard bit_is_set(Bitboard b, Square s) {
+  // CRITICAL: In atomic chess, SQ_NONE can occur if king exploded
+  // Return 0 instead of crashing on invalid square
+  if (s < SQ_A1 || s > SQ_H8)
+    return 0;
   return b & SetMaskBB[s];
 }
 
