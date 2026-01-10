@@ -15,6 +15,7 @@
 #include "thread.h"
 #include "ucioption.h"
 #include "book.h"
+#include "misc.h"
 // #include "fics.h"
 #include "create_book.h"
 #include "pgn.h"
@@ -69,7 +70,9 @@ int main(int argc, char* argv[]) {
 	generate_explosionSquares();
 	generate_squaresTouch();
 
-	if (!nnue::load(Options["EvalFile"].value<string>())) {
+	string eval_file = resolve_path_from_exe(Options["EvalFile"].value<string>());
+	Options["EvalFile"].set_value(eval_file);
+	if (!nnue::load(eval_file)) {
 		const string& err = nnue::last_error();
 		if (!err.empty())
 			cout << "NNUE: " << err << endl;

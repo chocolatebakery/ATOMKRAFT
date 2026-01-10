@@ -99,6 +99,80 @@ const string engine_authors() {
   return "Tord Romstad, Marco Costalba, Joona Kiiski, Dirk Kretschmann, Ciekce, ChocolateBakery";
 }
 
+namespace {
+
+bool is_path_separator(char c) {
+  return c == '/' || c == '\\';
+}
+
+bool is_absolute_path(const string& path) {
+  if (path.empty())
+    return false;
+#if defined(_WIN32)
+  if (path.size() >= 2) {
+    const char c = path[0];
+    if (((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) && path[1] == ':')
+      return true;
+    if (is_path_separator(path[0]) && is_path_separator(path[1]))
+      return true;
+  }
+  return is_path_separator(path[0]);
+#else
+  return path[0] == '/';
+#endif
+}
+
+string executable_path() {
+#if defined(_WIN32)
+  char buffer[MAX_PATH];
+  DWORD len = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+  if (len == 0 || len == MAX_PATH)
+    return string();
+  return string(buffer, len);
+#elif defined(__linux__)
+  char buffer[4096];
+  ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+  if (len <= 0)
+    return string();
+  buffer[len] = '\0';
+  return string(buffer);
+#else
+  return string();
+#endif
+}
+
+string executable_dir() {
+  const string path = executable_path();
+  if (path.empty())
+    return string();
+  const size_t pos = path.find_last_of("\\/");
+  if (pos == string::npos)
+    return string();
+  return path.substr(0, pos);
+}
+
+} // namespace
+
+string resolve_path_from_exe(const string& path) {
+  if (path.empty() || is_absolute_path(path))
+    return path;
+
+  const string dir = executable_dir();
+  if (dir.empty())
+    return path;
+
+  const char sep =
+#if defined(_WIN32)
+      '\\';
+#else
+      '/';
+#endif
+
+  if (is_path_separator(dir.back()))
+    return dir + path;
+  return dir + sep + path;
+}
+
 
 /// Debug stuff. Helper functions used mainly for debugging purposes
 

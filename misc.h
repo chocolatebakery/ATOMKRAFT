@@ -25,6 +25,7 @@
 
 extern const std::string engine_name();
 extern const std::string engine_authors();
+extern std::string resolve_path_from_exe(const std::string& path);
 extern int64_t get_system_time();
 extern int64_t get_cpu_usage();
 extern int cpu_count();

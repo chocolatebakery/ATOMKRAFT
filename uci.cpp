@@ -180,12 +180,14 @@ namespace {
         lowered[i] = char(tolower(lowered[i]));
 
     if (lowered == "evalfile") {
-        if (!nnue::load(Options["EvalFile"].value<string>())) {
+        string eval_file = resolve_path_from_exe(Options["EvalFile"].value<string>());
+        Options["EvalFile"].set_value(eval_file);
+        if (!nnue::load(eval_file)) {
             const string& err = nnue::last_error();
             if (!err.empty())
                 cout << "info string nnue: " << err << endl;
         } else {
-            cout << "info string nnue: loaded \"" << Options["EvalFile"].value<string>() << "\"" << endl;
+            cout << "info string nnue: loaded \"" << eval_file << "\"" << endl;
         }
         pos.reset_nnue();
     }
